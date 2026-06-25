@@ -43,9 +43,10 @@ All HTTP-only. Stdio mode ignores them.
 
 ## End-to-end deployment — clone to working connector
 
-The reference deployment runs on the `exit` VM (Ubuntu 24.04 ARM64,
-SSH alias `exit`, all commands as root). It uses **Tailscale Funnel**
-for HTTPS ingress so no domain or DNS plumbing is needed.
+The reference deployment runs on the `outbound` VM (Ubuntu 26.04 LTS
+x86_64, public IP `5.75.161.189`, SSH alias `outbound`, all commands as
+root). It uses **Tailscale Funnel** for HTTPS ingress so no domain or
+DNS plumbing is needed.
 
 ### 0. Prerequisites
 
@@ -67,9 +68,9 @@ for HTTPS ingress so no domain or DNS plumbing is needed.
 ### 1. Clone on the VM
 
 ```bash
-ssh exit
+ssh outbound
 cd /root
-git clone https://github.com/almax07082005/telegram-mcp.git
+git clone https://github.com/maldandan78/telegram-mcp.git
 cd telegram-mcp
 ```
 
@@ -235,7 +236,7 @@ simultaneously: Funnel for outside callers, tailnet for your devices.
 ### Rotate the login password
 
 ```bash
-ssh exit
+ssh outbound
 sed -i 's|^TELEGRAM_MCP_AUTH_PASSWORD=.*|TELEGRAM_MCP_AUTH_PASSWORD=<new>|' /root/telegram-mcp/.env
 cd /root/telegram-mcp && docker compose --profile http restart
 # Existing access tokens remain valid (the password only guards new logins).
@@ -250,7 +251,7 @@ uv run session_string_generator.py
 # Append to /root/telegram-mcp/.env:
 #   TELEGRAM_SESSION_STRING_<LABEL>=<session>
 # Restart:
-ssh exit "cd /root/telegram-mcp && docker compose --profile http restart"
+ssh outbound "cd /root/telegram-mcp && docker compose --profile http restart"
 ```
 
 The `account` parameter in MCP tool calls is the lowercased `<LABEL>`.
@@ -268,7 +269,7 @@ or migrate off Tailscale Funnel:
 ### Tail logs
 
 ```bash
-ssh exit
+ssh outbound
 docker logs -f telegram-mcp-http       # MCP server + Telethon
 journalctl -u tailscaled -f             # funnel ingress / cert errors
 ```
@@ -276,7 +277,7 @@ journalctl -u tailscaled -f             # funnel ingress / cert errors
 ### Inspect the OAuth DB
 
 ```bash
-ssh exit "docker exec telegram-mcp-http python -c '
+ssh outbound "docker exec telegram-mcp-http python -c '
 from telegram_mcp.auth.storage import OAuthStore
 s = OAuthStore(\"/data/oauth.db\")
 with s._cursor() as c:
