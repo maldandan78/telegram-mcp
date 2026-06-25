@@ -7,6 +7,7 @@ try:
 except UnsafeInstallationError as exc:
     raise SystemExit(str(exc)) from None
 
+from telegram_mcp import runtime as _runtime
 from telegram_mcp.runtime import *
 import telegram_mcp.tools  # noqa: F401 - registers MCP tools via decorators
 
@@ -25,21 +26,41 @@ async def _connect_authorized_client(label, client) -> None:
     )
 
 
+# Keeps the background cache-warm task referenced so it is not garbage
+# collected mid-run (asyncio holds only a weak reference to bare tasks).
+_warm_task = None
+
+
 async def connect_clients() -> None:
     """Connect every configured Telegram client and warm its entity cache.
 
     Shared by both the stdio entrypoint (:func:`_main`) and the HTTP
     entrypoint in :mod:`telegram_mcp.runner_http` so they behave identically
     at startup. Raises ``RuntimeError`` if any client is unauthorized.
+
+    The connect/authorize step blocks — the server must not serve until every
+    client is authorized — but entity-cache warming runs in the background:
+    blocking startup on it (e.g. under a GetDialogsRequest flood wait) makes
+    MCP clients time out, and ``resolve_entity()`` re-warms the cache on miss
+    anyway.
     """
     await asyncio.gather(
         *(_connect_authorized_client(label, cl) for label, cl in clients.items())
     )
 
-    # Warm entity caches — StringSession has no persistent cache,
-    # so fetch all dialogs once per client to populate them.
-    print("Warming entity caches...", file=sys.stderr)
-    await asyncio.gather(*(cl.get_dialogs() for cl in clients.values()))
+    # Warm entity caches in the background — StringSession has no persistent
+    # cache, so fetch all dialogs once per client to populate them.
+    print("Warming entity caches (background)...", file=sys.stderr)
+
+    async def _warm_caches() -> None:
+        try:
+            await asyncio.gather(*(cl.get_dialogs() for cl in clients.values()))
+            print("Entity caches warmed.", file=sys.stderr)
+        except Exception as warm_exc:
+            print(f"Entity cache warm failed: {warm_exc}", file=sys.stderr)
+
+    global _warm_task
+    _warm_task = asyncio.create_task(_warm_caches())
 
 
 async def _main() -> None:
@@ -78,6 +99,7 @@ def main() -> None:
         return
 
     _configure_allowed_roots_from_cli(sys.argv[1:])
+    _runtime._apply_exposed_tools_mode()
     nest_asyncio.apply()
     asyncio.run(_main())
 
