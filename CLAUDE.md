@@ -20,6 +20,7 @@ This file describes the additions and the end-to-end remote deployment.
 | `telegram_mcp/runner_http.py` | HTTP entrypoint. Connects Telegram clients + warms entity caches (same as stdio), then serves the FastMCP streamable-HTTP ASGI app via uvicorn with `proxy_headers=True` so `X-Forwarded-*` from the tunnel is trusted. |
 | `telegram_mcp/runtime.py` | `mcp = _build_mcp()` branches on `TELEGRAM_MCP_TRANSPORT`. In HTTP mode it wires the provider + `AuthSettings` into `FastMCP(...)` — the SDK auto-mounts `/authorize`, `/token`, `/register`, `/revoke`, `/.well-known/oauth-authorization-server`, `/.well-known/oauth-protected-resource/mcp`. |
 | `telegram_mcp/runner.py` | `main()` branches: `TELEGRAM_MCP_TRANSPORT=http` → `runner_http.main()`, else existing stdio path. |
+| `telegram_mcp/protocol_compat.py` | Shim installed by `_build_mcp()`: lets the streamable-HTTP transport accept `MCP-Protocol-Version: 2026-07-28`. Anthropic's hosted connector client (`User-Agent: Claude-User`, used by claude.ai, Claude Desktop custom connectors and Cowork) sends that header; the 1.x SDK (`mcp<2`, pinned upstream) only knows up to 2025-11-25 and answers 400, which shows up as an "unreachable" or flaky connector. Remove once upstream moves to `mcp>=2`. |
 | `Dockerfile` | `EXPOSE 8000`, pre-creates `/data` chowned to `appuser` so the OAuth-DB named volume inherits the right perms. |
 | `docker-compose.yml` | Two profiles: `stdio` (unchanged) and `http` (the new one with port binding + `oauth-data` named volume + `TELEGRAM_MCP_OAUTH_DB=/data/oauth.db`). |
 

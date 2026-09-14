@@ -156,6 +156,13 @@ _STATELESS_HTTP = True
 
 
 def _build_mcp() -> FastMCP:
+    # Let the streamable-HTTP transport accept the 2026-07-28 protocol header
+    # Anthropic's hosted connector client sends (see protocol_compat.py).
+    # Applies to both the fork's OAuth path and upstream's MCP_TRANSPORT=http.
+    from telegram_mcp import protocol_compat
+
+    protocol_compat.install()
+
     if TELEGRAM_MCP_TRANSPORT != "http":
         return FastMCP("telegram", stateless_http=_STATELESS_HTTP)
 
