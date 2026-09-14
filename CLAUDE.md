@@ -31,7 +31,8 @@ All HTTP-only. Stdio mode ignores them.
 
 | Var | Required | Default | Purpose |
 |---|---|---|---|
-| `TELEGRAM_MCP_TRANSPORT` | — | `stdio` | Set to `http` to enable the new transport. |
+| `TELEGRAM_MCP_TRANSPORT` | — | `stdio` | Set to `http` to enable the new transport. Distinct from upstream's `MCP_TRANSPORT=http`, which serves an **unauthenticated** streamable-HTTP endpoint on `127.0.0.1:8765` for local multi-client sharing (see README "Transports"). When `TELEGRAM_MCP_TRANSPORT=http` is set it wins and `MCP_TRANSPORT` is ignored. |
+| `MCP_ALLOWED_HOSTS` / `MCP_ALLOWED_ORIGINS` | — | unset | Upstream knobs, honoured by both HTTP paths: enable FastMCP's DNS-rebinding protection for the listed `Host` / `Origin` values. Leave unset behind Tailscale Funnel (the SDK then accepts any Host). |
 | `TELEGRAM_MCP_PUBLIC_URL` | yes (HTTP) | — | Externally reachable HTTPS base URL (no trailing `/`). Published as OAuth `issuer` and resource identifier and used to build the redirect from `/login` back to the client. **Must exactly match what Claude Desktop connects to.** |
 | `TELEGRAM_MCP_AUTH_PASSWORD` | yes (HTTP) | — | The single user's login-form password. |
 | `TELEGRAM_MCP_AUTH_USERNAME` | — | `admin` | Username for the login form. |
