@@ -62,7 +62,6 @@ from starlette.routing import Route
 
 from telegram_mcp.auth.storage import OAuthStore
 
-
 # Token / code lifetimes -----------------------------------------------------
 AUTH_CODE_TTL = 600  # 10 minutes
 LOGIN_SESSION_TTL = 600  # 10 minutes -- user must finish login within this window
@@ -138,21 +137,15 @@ class SingleUserOAuthProvider(OAuthAuthorizationServerProvider, TokenVerifier):
         authorization_code: AuthorizationCode,
     ) -> OAuthToken:
         # Authorization codes are single-use.
-        await asyncio.to_thread(
-            self._store.delete_auth_code, authorization_code.code
-        )
+        await asyncio.to_thread(self._store.delete_auth_code, authorization_code.code)
         access = self._make_access_token(
             client.client_id,
             authorization_code.scopes,
             resource=authorization_code.resource,
         )
-        refresh = self._make_refresh_token(
-            client.client_id, authorization_code.scopes
-        )
+        refresh = self._make_refresh_token(client.client_id, authorization_code.scopes)
         await asyncio.to_thread(self._store.put_access_token, access)
-        await asyncio.to_thread(
-            self._store.put_refresh_token, refresh, access.token
-        )
+        await asyncio.to_thread(self._store.put_refresh_token, refresh, access.token)
         return self._build_oauth_token(access, refresh)
 
     async def load_refresh_token(
@@ -178,17 +171,13 @@ class SingleUserOAuthProvider(OAuthAuthorizationServerProvider, TokenVerifier):
         )
         if old_access:
             await asyncio.to_thread(self._store.delete_access_token, old_access)
-        await asyncio.to_thread(
-            self._store.delete_refresh_token, refresh_token.token
-        )
+        await asyncio.to_thread(self._store.delete_refresh_token, refresh_token.token)
 
         new_scopes = scopes or refresh_token.scopes
         access = self._make_access_token(client.client_id, new_scopes)
         new_refresh = self._make_refresh_token(client.client_id, new_scopes)
         await asyncio.to_thread(self._store.put_access_token, access)
-        await asyncio.to_thread(
-            self._store.put_refresh_token, new_refresh, access.token
-        )
+        await asyncio.to_thread(self._store.put_refresh_token, new_refresh, access.token)
         return self._build_oauth_token(access, new_refresh)
 
     async def load_access_token(self, token: str) -> Optional[AccessToken]:
@@ -287,9 +276,7 @@ class SingleUserOAuthProvider(OAuthAuthorizationServerProvider, TokenVerifier):
             resource=resource,
         )
 
-    def _make_refresh_token(
-        self, client_id: str, scopes: list[str]
-    ) -> RefreshToken:
+    def _make_refresh_token(self, client_id: str, scopes: list[str]) -> RefreshToken:
         return RefreshToken(
             token=secrets.token_urlsafe(48),
             client_id=client_id,
@@ -297,9 +284,7 @@ class SingleUserOAuthProvider(OAuthAuthorizationServerProvider, TokenVerifier):
             expires_at=int(time.time() + REFRESH_TOKEN_TTL),
         )
 
-    def _build_oauth_token(
-        self, access: AccessToken, refresh: RefreshToken
-    ) -> OAuthToken:
+    def _build_oauth_token(self, access: AccessToken, refresh: RefreshToken) -> OAuthToken:
         return OAuthToken(
             access_token=access.token,
             token_type="Bearer",
@@ -314,11 +299,7 @@ class SingleUserOAuthProvider(OAuthAuthorizationServerProvider, TokenVerifier):
 
     def _gc_login_sessions(self) -> None:
         now = time.time()
-        expired = [
-            sid
-            for sid, value in self._login_sessions.items()
-            if value["expires_at"] < now
-        ]
+        expired = [sid for sid, value in self._login_sessions.items() if value["expires_at"] < now]
         for sid in expired:
             self._login_sessions.pop(sid, None)
 
@@ -333,9 +314,7 @@ class SingleUserOAuthProvider(OAuthAuthorizationServerProvider, TokenVerifier):
 
     @staticmethod
     def _render_form(session_id: str, error: Optional[str] = None) -> str:
-        error_html = (
-            f"<p style='color:#c0392b;margin:0 0 8px;'>{error}</p>" if error else ""
-        )
+        error_html = f"<p style='color:#c0392b;margin:0 0 8px;'>{error}</p>" if error else ""
         return f"""<!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8"><title>telegram-mcp login</title>
@@ -394,9 +373,7 @@ def build_oauth_provider() -> SingleUserOAuthProvider:
     public_url = os.getenv("TELEGRAM_MCP_PUBLIC_URL")
     db_path = os.getenv("TELEGRAM_MCP_OAUTH_DB", ":memory:")
     if not password:
-        raise SystemExit(
-            "TELEGRAM_MCP_AUTH_PASSWORD must be set when TELEGRAM_MCP_TRANSPORT=http"
-        )
+        raise SystemExit("TELEGRAM_MCP_AUTH_PASSWORD must be set when TELEGRAM_MCP_TRANSPORT=http")
     if not public_url:
         raise SystemExit(
             "TELEGRAM_MCP_PUBLIC_URL must be set when TELEGRAM_MCP_TRANSPORT=http "

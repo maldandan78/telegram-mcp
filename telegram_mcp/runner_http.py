@@ -12,15 +12,21 @@ import asyncio
 import os
 import sys
 
-import nest_asyncio
 import uvicorn
 
+from telegram_mcp import runtime as _runtime
+from telegram_mcp import transcription as _transcription
 from telegram_mcp.runtime import (
     _configure_allowed_roots_from_cli,
     clients,
     mcp,
 )
-from telegram_mcp.runner import connect_clients
+from telegram_mcp.runner import (
+    _configure_transport_security,
+    _session_lock_shared,
+    _session_locks,
+    connect_clients,
+)
 
 
 async def _serve_http() -> None:
@@ -42,6 +48,10 @@ async def _serve_http() -> None:
     if isinstance(provider, SingleUserOAuthProvider):
         for route in provider.routes():
             app.routes.append(route)
+
+    # Optional DNS-rebinding protection (MCP_ALLOWED_HOSTS / MCP_ALLOWED_ORIGINS),
+    # same knobs as the upstream MCP_TRANSPORT=http path.
+    _configure_transport_security()
 
     host = os.getenv("TELEGRAM_MCP_HOST", "0.0.0.0")
     port = int(os.getenv("TELEGRAM_MCP_PORT", "8000"))
@@ -72,11 +82,17 @@ async def _serve_http() -> None:
             *(cl.disconnect() for cl in clients.values()),
             return_exceptions=True,
         )
+        for lock in _session_locks.values():
+            lock.release()
+        _session_locks.clear()
 
 
 def main() -> None:
+    # Same startup validation as the stdio path in ``runner.main``.
     _configure_allowed_roots_from_cli(sys.argv[1:])
-    nest_asyncio.apply()
+    _runtime._apply_exposed_tools_mode()
+    _transcription.validate_transcription_config()
+    _session_lock_shared()  # fail loudly at startup on a bad toggle
     asyncio.run(_serve_http())
 
 

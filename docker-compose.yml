@@ -2,9 +2,9 @@ version: '3.8'
 
 # Two service variants, selected by Compose profile:
 #
-#   stdio (default): the classic local-only MCP server. Useful when you
-#     attach it as a stdio MCP from Claude Desktop / Claude Code on the
-#     same machine.
+#   stdio: the upstream service. Despite the profile name it now serves
+#     upstream's unauthenticated streamable HTTP (MCP_TRANSPORT=http) on
+#     127.0.0.1:8765 so several local MCP clients can share one container.
 #
 #   http: streamable-HTTP transport with OAuth 2.1 + PKCE. Intended for
 #     remote deployment behind an HTTPS reverse proxy or Cloudflare Tunnel
@@ -27,14 +27,29 @@ services:
     # Load environment variables from a .env file in the same directory
     env_file:
       - .env
-    # Keep stdin open and allocate a pseudo-TTY, crucial for stdio MCP servers
-    stdin_open: true
-    tty: true
+    # Serve streamable HTTP so one long-lived container is shared by all MCP
+    # clients (see the Transports section in README.md). MCP_HOST must be
+    # 0.0.0.0 inside the container for the published port to work.
+    environment:
+      MCP_TRANSPORT: http
+      MCP_HOST: 0.0.0.0
+    # The endpoint is unauthenticated — publish on localhost only.
+    ports:
+      - "127.0.0.1:8765:8765"
     # Optional: Uncomment the following lines to mount a local directory
     # for persisting the Telegram session file if NOT using TELEGRAM_SESSION_STRING.
     # Replace './telegram_sessions' with your desired host path.
     # volumes:
     #   - ./telegram_sessions:/app
+    volumes:
+      # Voice/video-note transcript cache (SQLite, see telegram_mcp/transcription.py).
+      # Without this mount the cache lives only in the container's writable
+      # layer and is lost on every `docker compose build`. It holds plaintext
+      # personal-chat transcripts, so this directory should get its own
+      # backup/retention policy rather than riding along with a general backup.
+      # Host directory must be readable/writable by uid 1000 (appuser):
+      #   mkdir -p ./transcript_cache && chown 1000:1000 ./transcript_cache
+      - ./transcript_cache:/app/data/transcripts
     restart: unless-stopped
 
   telegram-mcp-http:

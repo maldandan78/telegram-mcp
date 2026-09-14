@@ -30,7 +30,6 @@ from typing import Iterator, Optional, Union
 from mcp.server.auth.provider import AccessToken, AuthorizationCode, RefreshToken
 from mcp.shared.auth import OAuthClientInformationFull
 
-
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS clients (
     client_id TEXT PRIMARY KEY,
@@ -73,9 +72,7 @@ class OAuthStore:
             parent = os.path.dirname(db_path)
             if parent:
                 os.makedirs(parent, exist_ok=True)
-        self._conn = sqlite3.connect(
-            db_path, check_same_thread=False, isolation_level=None
-        )
+        self._conn = sqlite3.connect(db_path, check_same_thread=False, isolation_level=None)
         self._conn.row_factory = sqlite3.Row
         self._lock = threading.Lock()
         with self._cursor() as cur:
@@ -175,9 +172,7 @@ class OAuthStore:
             return None
         return RefreshToken.model_validate_json(row["entry_json"])
 
-    def put_refresh_token(
-        self, entry: RefreshToken, access_token: Optional[str] = None
-    ) -> None:
+    def put_refresh_token(self, entry: RefreshToken, access_token: Optional[str] = None) -> None:
         with self._cursor() as cur:
             cur.execute(
                 "INSERT OR REPLACE INTO refresh_tokens"
@@ -217,12 +212,10 @@ class OAuthStore:
         with self._cursor() as cur:
             cur.execute("DELETE FROM auth_codes WHERE expires_at < ?", (ts,))
             cur.execute(
-                "DELETE FROM access_tokens "
-                "WHERE expires_at IS NOT NULL AND expires_at < ?",
+                "DELETE FROM access_tokens " "WHERE expires_at IS NOT NULL AND expires_at < ?",
                 (int(ts),),
             )
             cur.execute(
-                "DELETE FROM refresh_tokens "
-                "WHERE expires_at IS NOT NULL AND expires_at < ?",
+                "DELETE FROM refresh_tokens " "WHERE expires_at IS NOT NULL AND expires_at < ?",
                 (int(ts),),
             )
