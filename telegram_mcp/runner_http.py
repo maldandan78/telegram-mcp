@@ -42,8 +42,18 @@ async def _serve_http() -> None:
     # here (after the package is fully initialized) so that the FastMCP
     # session manager is created in the right order.
     from telegram_mcp.auth import SingleUserOAuthProvider
+    from telegram_mcp.transport.http import ProtocolNegotiationMiddleware
 
     app = mcp.streamable_http_app()
+    # Upstream patches ``FastMCP.streamable_http_app`` to wrap the whole app in
+    # ProtocolNegotiationMiddleware, which answers every OPTIONS with 204 and
+    # every plain GET with a discovery JSON -- regardless of path, and before
+    # auth runs. That would swallow /login, /authorize and /.well-known/* and
+    # turn the unauthenticated GET /mcp 401 into a 200. Serve the bare Starlette
+    # app instead; the SDK-level patch in install_protocol_compatibility()
+    # already makes the transport accept the 2026-07-28 header.
+    if isinstance(app, ProtocolNegotiationMiddleware):
+        app = app.app
     provider = mcp._auth_server_provider  # type: ignore[attr-defined]
     if isinstance(provider, SingleUserOAuthProvider):
         for route in provider.routes():
@@ -90,6 +100,9 @@ async def _serve_http() -> None:
 def main() -> None:
     # Same startup validation as the stdio path in ``runner.main``.
     _configure_allowed_roots_from_cli(sys.argv[1:])
+    # Extension overrides validate tool names against the full tool set, so
+    # they must run before _apply_exposed_tools_mode() prunes it.
+    _runtime._apply_file_extension_overrides()
     _runtime._apply_exposed_tools_mode()
     _transcription.validate_transcription_config()
     _session_lock_shared()  # fail loudly at startup on a bad toggle

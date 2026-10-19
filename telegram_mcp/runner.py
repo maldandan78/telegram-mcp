@@ -7,7 +7,15 @@ try:
 except UnsafeInstallationError as exc:
     raise SystemExit(str(exc)) from None
 
-from telethon.errors import AuthKeyDuplicatedError
+import sys
+from telethon.errors import AuthKeyDuplicatedError, BotMethodInvalidError
+
+# Ensure sys.stderr is reconfigured for UTF-8 on Windows where possible
+if hasattr(sys.stderr, "reconfigure"):
+    try:
+        sys.stderr.reconfigure(encoding="utf-8", errors="backslashreplace")
+    except Exception:
+        pass
 
 from telegram_mcp import runtime as _runtime
 from telegram_mcp import transcription as _transcription
@@ -55,6 +63,44 @@ def _session_lock_shared() -> bool:
     return raw == "shared"
 
 
+def _normalize_username(value) -> str:
+    return (value or "").strip().lstrip("@").casefold()
+
+
+def _expected_username(label: str) -> str:
+    """TELEGRAM_EXPECTED_USERNAME_<LABEL>, else TELEGRAM_EXPECTED_USERNAME; "" if unset."""
+    raw = os.getenv(f"TELEGRAM_EXPECTED_USERNAME_{label.upper()}") or os.getenv(
+        "TELEGRAM_EXPECTED_USERNAME"
+    )
+    return _normalize_username(raw)
+
+
+async def _verify_expected_username(label: str, client) -> None:
+    """Refuse to serve a session logged in to a different account."""
+    expected = _expected_username(label)
+    if not expected:
+        return
+
+    me = await client.get_me()
+    usernames = {_normalize_username(getattr(me, "username", None))}
+    for entry in getattr(me, "usernames", None) or []:
+        if getattr(entry, "active", False):
+            usernames.add(_normalize_username(getattr(entry, "username", None)))
+    usernames.discard("")
+
+    if expected in usernames:
+        return
+
+    try:
+        await client.disconnect()
+    except Exception:
+        pass
+    raise RuntimeError(
+        f"Telegram client '{label}' is logged in to a different account than "
+        f"TELEGRAM_EXPECTED_USERNAME_{label.upper()} / TELEGRAM_EXPECTED_USERNAME expects."
+    )
+
+
 async def _connect_authorized_client(label, client) -> None:
     # First, prevent our own duplicate-spawn case outright: a per-session lock
     # means a second instance of this server never even attempts to connect
@@ -98,6 +144,7 @@ async def _connect_authorized_client(label, client) -> None:
             await asyncio.sleep(delay)
 
     if await client.is_user_authorized():
+        await _verify_expected_username(label, client)
         return
 
     raise RuntimeError(
@@ -134,8 +181,20 @@ async def connect_clients() -> None:
     print("Warming entity caches (background)...", file=sys.stderr)
 
     async def _warm_caches() -> None:
+        async def _warm_client(label: str, cl: TelegramClient) -> None:
+            try:
+                await cl.get_dialogs()
+            except BotMethodInvalidError:
+                print(
+                    f"Skipping entity cache pre-warm for bot client "
+                    f"'{label}' (dialogs restricted for bots).",
+                    file=sys.stderr,
+                )
+            except Exception as exc:
+                print(f"Entity cache warm failed for '{label}': {exc}", file=sys.stderr)
+
         try:
-            await asyncio.gather(*(cl.get_dialogs() for cl in clients.values()))
+            await asyncio.gather(*(_warm_client(label, cl) for label, cl in clients.items()))
             print("Entity caches warmed.", file=sys.stderr)
         except Exception as warm_exc:
             print(f"Entity cache warm failed: {warm_exc}", file=sys.stderr)
@@ -196,10 +255,32 @@ async def _main() -> None:
         await connect_clients()
 
         transport = os.getenv("MCP_TRANSPORT", "stdio").lower()
-        print(
-            f"Telegram client(s) started ({labels}). Running MCP server ({transport})...",
-            file=sys.stderr,
-        )
+
+        # Validate transport mode
+        VALID_TRANSPORTS = ("stdio", "http", "sse")
+        if transport not in VALID_TRANSPORTS:
+            accepted = ", ".join(VALID_TRANSPORTS)
+            print(
+                f"Invalid MCP_TRANSPORT '{transport}'. Expected one of: {accepted}.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+
+        # Startup log with host:port for HTTP/SSE transports
+        if transport in ("http", "sse"):
+            host = os.getenv("MCP_HOST", "127.0.0.1")
+            port = os.getenv("MCP_PORT", "8765")
+            print(
+                f"Telegram client(s) started ({labels}). Running MCP server "
+                f"({transport}) on {host}:{port}...",
+                file=sys.stderr,
+            )
+        else:
+            print(
+                f"Telegram client(s) started ({labels}). Running MCP server ({transport})...",
+                file=sys.stderr,
+            )
+
         await _serve(transport)
     except Exception as e:
         print(f"Error starting client: {e}", file=sys.stderr)
@@ -243,7 +324,38 @@ def main() -> None:
         return
 
     _configure_allowed_roots_from_cli(sys.argv[1:])
-    _runtime._apply_exposed_tools_mode()
+    # Apply CLI transport/host/port overrides to environment (runtime sets globals)
+    transport = _runtime._CLI_TRANSPORT or "stdio"
+    host = _runtime._CLI_HOST
+    port = _runtime._CLI_PORT
+
+    if transport != "stdio":
+        os.environ["MCP_TRANSPORT"] = transport
+    if host:
+        os.environ["MCP_HOST"] = host
+    if port is not None:
+        os.environ["MCP_PORT"] = str(port)
+    # Before _apply_exposed_tools_mode(): that prunes non-exposed tools from
+    # the tool manager, and the extension overrides validate tool names
+    # against that same manager. Narrowing send_file's extensions while
+    # send_file is not exposed is a valid configuration, so the name check
+    # has to see the full tool set.
+    _runtime._apply_file_extension_overrides()
+    hidden, excluded = _runtime._apply_exposed_tools_mode()
+    if hidden:
+        # These names are the menu for the "+" allowlist; without this line the
+        # only way to find them is reading the tool annotations in the source.
+        print(
+            f"TELEGRAM_EXPOSED_TOOLS hides {len(hidden)} tool(s); list any of them "
+            f"after '+' to expose it: {', '.join(sorted(hidden))}",
+            file=sys.stderr,
+        )
+    if excluded:
+        print(
+            f"TELEGRAM_EXPOSED_TOOLS excludes {len(excluded)} tool(s) listed "
+            f"after '-': {', '.join(sorted(excluded))}",
+            file=sys.stderr,
+        )
     _transcription.validate_transcription_config()
     _session_lock_shared()  # fail loudly at startup on a bad toggle
     asyncio.run(_main())
